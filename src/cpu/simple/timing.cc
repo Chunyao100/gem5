@@ -37,14 +37,11 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Authors: Steve Reinhardt
  */
 
 #include "cpu/simple/timing.hh"
 
 #include "arch/locked_mem.hh"
-#include "arch/mmapped_ipr.hh"
 #include "arch/utility.hh"
 #include "config/the_isa.hh"
 #include "cpu/exetrace.hh"
@@ -268,8 +265,8 @@ TimingSimpleCPU::handleReadPacket(PacketPtr pkt)
     if (pkt->isRead() && pkt->req->isLLSC()) {
         TheISA::handleLockedRead(thread, pkt->req);
     }
-    if (req->isMmappedIpr()) {
-        Cycles delay = TheISA::handleIprRead(thread->getTC(), pkt);
+    if (req->isLocalAccess()) {
+        Cycles delay = req->localAccessor(thread->getTC(), pkt);
         new IprEvent(pkt, this, clockEdge(delay));
         _status = DcacheWaitResponse;
         dcache_pkt = NULL;
@@ -390,7 +387,7 @@ TimingSimpleCPU::buildSplitPacket(PacketPtr &pkt1, PacketPtr &pkt2,
 {
     pkt1 = pkt2 = NULL;
 
-    assert(!req1->isMmappedIpr() && !req2->isMmappedIpr());
+    assert(!req1->isLocalAccess() && !req2->isLocalAccess());
 
     if (req->getFlags().isSet(Request::NO_ACCESS)) {
         pkt1 = buildPacket(req, read);
@@ -424,7 +421,6 @@ TimingSimpleCPU::initiateMemRead(Addr addr, unsigned size,
     SimpleThread* thread = t_info.thread;
 
     Fault fault;
-    const int asid = 0;
     const Addr pc = thread->instAddr();
     unsigned block_size = cacheLineSize();
     BaseTLB::Mode mode = BaseTLB::Read;
@@ -433,8 +429,7 @@ TimingSimpleCPU::initiateMemRead(Addr addr, unsigned size,
         traceData->setMem(addr, size, flags);
 
     RequestPtr req = std::make_shared<Request>(
-        asid, addr, size, flags, dataMasterId(), pc,
-        thread->contextId());
+        addr, size, flags, dataMasterId(), pc, thread->contextId());
     if (!byte_enable.empty()) {
         req->setByteEnable(byte_enable);
     }
@@ -478,8 +473,8 @@ TimingSimpleCPU::handleWritePacket()
     SimpleThread* thread = t_info.thread;
 
     const RequestPtr &req = dcache_pkt->req;
-    if (req->isMmappedIpr()) {
-        Cycles delay = TheISA::handleIprWrite(thread->getTC(), dcache_pkt);
+    if (req->isLocalAccess()) {
+        Cycles delay = req->localAccessor(thread->getTC(), dcache_pkt);
         new IprEvent(dcache_pkt, this, clockEdge(delay));
         _status = DcacheWaitResponse;
         dcache_pkt = NULL;
@@ -502,7 +497,6 @@ TimingSimpleCPU::writeMem(uint8_t *data, unsigned size,
     SimpleThread* thread = t_info.thread;
 
     uint8_t *newData = new uint8_t[size];
-    const int asid = 0;
     const Addr pc = thread->instAddr();
     unsigned block_size = cacheLineSize();
     BaseTLB::Mode mode = BaseTLB::Write;
@@ -519,8 +513,7 @@ TimingSimpleCPU::writeMem(uint8_t *data, unsigned size,
         traceData->setMem(addr, size, flags);
 
     RequestPtr req = std::make_shared<Request>(
-        asid, addr, size, flags, dataMasterId(), pc,
-        thread->contextId());
+        addr, size, flags, dataMasterId(), pc, thread->contextId());
     if (!byte_enable.empty()) {
         req->setByteEnable(byte_enable);
     }
@@ -570,7 +563,6 @@ TimingSimpleCPU::initiateMemAMO(Addr addr, unsigned size,
     SimpleThread* thread = t_info.thread;
 
     Fault fault;
-    const int asid = 0;
     const Addr pc = thread->instAddr();
     unsigned block_size = cacheLineSize();
     BaseTLB::Mode mode = BaseTLB::Write;
@@ -578,7 +570,7 @@ TimingSimpleCPU::initiateMemAMO(Addr addr, unsigned size,
     if (traceData)
         traceData->setMem(addr, size, flags);
 
-    RequestPtr req = make_shared<Request>(asid, addr, size, flags,
+    RequestPtr req = make_shared<Request>(addr, size, flags,
                             dataMasterId(), pc, thread->contextId(),
                             std::move(amo_op));
 
